@@ -49,7 +49,17 @@ class PineconeVectorStore:
 
     def _connect_index(self):
         """Validates index existence and returns the Index instance."""
-        existing_indexes = [idx.name for idx in self.pc.list_indexes()]
+        index_list = self.pc.list_indexes()
+        if hasattr(index_list, "names"):
+            existing_indexes = list(index_list.names())
+        elif isinstance(index_list, list):
+            existing_indexes = [
+                idx.name if hasattr(idx, "name") else (idx["name"] if isinstance(idx, dict) else str(idx))
+                for idx in index_list
+            ]
+        else:
+            existing_indexes = [getattr(idx, "name", str(idx)) for idx in index_list]
+
         if self.index_name not in existing_indexes:
             raise ValueError(
                 f"Index '{self.index_name}' not found. Available indexes: {existing_indexes}"

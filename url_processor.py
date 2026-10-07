@@ -69,8 +69,12 @@ def chunk_text(
 ) -> List[str]:
     """
     Splits text into chunks respecting paragraph / sentence boundaries where feasible,
-    with configurable overlap.
+    with configurable overlap between chunks.
     """
+    if not text:
+        return []
+
+    text = text.strip()
     if not text:
         return []
 
@@ -78,34 +82,79 @@ def chunk_text(
     if len(text) <= chunk_size:
         return [text]
 
-    chunks = []
+    chunk_overlap = max(0, min(chunk_overlap, chunk_size - 1))
+
     # Split by double newlines (paragraphs) first
-    paragraphs = text.split("\n\n")
+    raw_paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    # Break down long paragraphs into smaller units (sentences or sliding window slices)
+    units = []
+    for p in raw_paragraphs:
+        if len(p) <= chunk_size:
+            units.append(p)
+        else:
+            # Split long paragraph by sentences
+            sentences = re.split(r"(?<=[.!?…])\s+", p)
+            current_unit = ""
+            for s in sentences:
+                s = s.strip()
+                if not s:
+                    continue
+                if len(s) > chunk_size:
+                    # If a single sentence exceeds chunk_size, slice by window
+                    step = max(1, chunk_size - chunk_overlap)
+                    for start in range(0, len(s), step):
+                        sub = s[start : start + chunk_size].strip()
+                        if sub:
+                            units.append(sub)
+                    current_unit = ""
+                elif len(current_unit) + len(s) + 1 <= chunk_size:
+                    current_unit = f"{current_unit} {s}".strip()
+                else:
+                    if current_unit:
+                        units.append(current_unit)
+                    current_unit = s
+            if current_unit:
+                units.append(current_unit)
+
+    if not units:
+        return []
+
+    # Assemble units into final chunks with proper inter-chunk overlap
+    chunks = []
     current_chunk = ""
 
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
+    for unit in units:
+        unit = unit.strip()
+        if not unit:
             continue
 
-        if len(current_chunk) + len(para) + 1 <= chunk_size:
-            current_chunk = f"{current_chunk}\n\n{para}".strip()
+        if not current_chunk:
+            current_chunk = unit
+        elif len(current_chunk) + len(unit) + 2 <= chunk_size:
+            current_chunk = f"{current_chunk}\n\n{unit}"
         else:
-            if current_chunk:
-                chunks.append(current_chunk)
-            # If paragraph itself is larger than chunk_size, split by sentences/length
-            if len(para) > chunk_size:
-                step = max(1, chunk_size - chunk_overlap)
-                for start in range(0, len(para), step):
-                    sub = para[start : start + chunk_size].strip()
-                    if sub:
-                        chunks.append(sub)
-                current_chunk = ""
-            else:
-                # Add overlap from end of previous text if applicable
-                current_chunk = para
+            chunks.append(current_chunk)
 
-    if current_chunk and current_chunk not in chunks:
+            # Build overlap from the tail of the previous chunk
+            if chunk_overlap > 0:
+                overlap_source = current_chunk
+                if len(overlap_source) > chunk_overlap:
+                    overlap_part = overlap_source[-chunk_overlap:]
+                    first_space = overlap_part.find(" ")
+                    if first_space != -1 and first_space < len(overlap_part) - 1:
+                        overlap_part = overlap_part[first_space + 1:].strip()
+                else:
+                    overlap_part = overlap_source.strip()
+
+                if overlap_part and len(overlap_part) + len(unit) + 2 <= chunk_size:
+                    current_chunk = f"{overlap_part}\n\n{unit}"
+                else:
+                    current_chunk = unit
+            else:
+                current_chunk = unit
+
+    if current_chunk and (not chunks or current_chunk != chunks[-1]):
         chunks.append(current_chunk)
 
     return chunks
